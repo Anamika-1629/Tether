@@ -1,0 +1,24 @@
+{
+  "info": { "name": "Tether - Incident Service", "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json" },
+  "variable": [
+    { "key": "base", "value": "http://localhost:8082" },
+    { "key": "incidentId", "value": "" }
+  ],
+  "item": [
+    { "name": "Create incident",
+      "event": [{ "listen": "test", "script": { "exec": ["pm.collectionVariables.set('incidentId', pm.response.json().id);"] } }],
+      "request": { "method": "POST", "url": "{{base}}/incidents",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Tenant-Id", "value": "acme" }, { "key": "X-Actor", "value": "alice" }],
+        "body": { "mode": "raw", "raw": "{\n  \"title\": \"Checkout API 500s\",\n  \"severity\": \"SEV2\",\n  \"owner\": \"alice\"\n}" } } },
+    { "name": "List incidents",
+      "request": { "method": "GET", "url": "{{base}}/incidents", "header": [{ "key": "X-Tenant-Id", "value": "acme" }] } },
+    { "name": "Get incident",
+      "request": { "method": "GET", "url": "{{base}}/incidents/{{incidentId}}", "header": [{ "key": "X-Tenant-Id", "value": "acme" }] } },
+    { "name": "Patch incident",
+      "request": { "method": "PATCH", "url": "{{base}}/incidents/{{incidentId}}",
+        "header": [{ "key": "Content-Type", "value": "application/json" }, { "key": "X-Tenant-Id", "value": "acme" }, { "key": "X-Actor", "value": "bob" }],
+        "body": { "mode": "raw", "raw": "{\n  \"status\": \"INVESTIGATING\",\n  \"owner\": \"bob\"\n}" } } },
+    { "name": "Get audit timeline",
+      "request": { "method": "GET", "url": "{{base}}/incidents/{{incidentId}}/audit", "header": [{ "key": "X-Tenant-Id", "value": "acme" }] } }
+  ]
+}
