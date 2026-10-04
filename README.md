@@ -1,4 +1,4 @@
-# IncidentSync
+# Tether 
 
 **Real-Time Collaborative Incident Response Platform**
 
