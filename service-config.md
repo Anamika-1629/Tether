@@ -7,7 +7,7 @@ This document contains the shared service configuration and infrastructure detai
 | Service | Port | Base URL | Status |
 |---|---:|---|---|
 | Frontend | 3000 | `http://localhost:3000` | Pending |
-| Auth Service | 8081 | `http://localhost:8081` | Pending |
+| Auth Service | 8081 | `http://localhost:8081` | Working (tested locally) |
 | Incident Service | 8082 | `http://localhost:8082` | Working |
 | Sync Service | 8083 | `http://localhost:8083` | Pending |
 
@@ -22,7 +22,7 @@ Supabase provides the shared PostgreSQL database for the Tether services. The In
 - Database provider: Supabase
 - Database type: PostgreSQL
 - Incident Service: Connected and tested
-- Auth Service: Pending
+- Auth Service: Ready (same `DB_*` variables; tested on local Postgres alongside the Incident Service, Supabase connection pending)
 - Sync Service: Pending
 
 ### Redis
