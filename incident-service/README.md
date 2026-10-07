@@ -5,14 +5,23 @@ Spring Boot 3 / Java 17 / PostgreSQL. Port **8082**. Covers FR1, FR5, FR7.
 ## Run
 ```bash
 docker compose up -d postgres        # from the repo root
-cd services/incident-service
+cd incident-service
 ./mvnw spring-boot:run               # defaults match docker-compose.yml (incidentsync/incidentsync)
 ```
-No `mvnw` yet? Run `mvn -N wrapper:wrapper` once in this folder (or copy the wrapper from another Tether service).
 Flyway creates `incident` and `audit_event` on first start (history table `incident_schema_history`, so it won't clash with other services on the shared DB).
 
-## Identity (temporary)
-`X-Tenant-Id` (default `default`) and `X-Actor` (default `anonymous`) headers stand in for auth. Every query is scoped by tenant.
+## Authentication
+Every endpoint requires `Authorization: Bearer <jwt>` issued by **auth-service** (8081). Tenant and actor come **only** from the verified token (`tenantId` and `email` claims); the old `X-Tenant-Id` / `X-Actor` headers are ignored and a request with no token gets `401`.
+
+| Variable | Default | Notes |
+|---|---|---|
+| `JWT_SECRET` | dev-only value (same as auth-service) | **Must equal auth-service's value.** At least 32 bytes or startup fails. |
+| `JWT_ISSUER` | `tether-auth` | Tokens from any other issuer are rejected |
+| `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Comma-separated frontend origins |
+
+A token is rejected (401) if the signature is wrong, it is expired, the issuer differs, or it has no `tenantId` claim. A tenant can never see another tenant's incidents (404).
+
+Get a token: `curl -s -X POST localhost:8081/auth/login -H 'Content-Type: application/json' -d '{"email":"...","password":"..."}'` and use `accessToken`.
 
 ## Endpoints
 | Method | Path | Notes |
@@ -27,19 +36,22 @@ Enums: status `OPEN|INVESTIGATING|MITIGATED|RESOLVED`, severity `SEV1..SEV4`.
 
 ## curl
 ```bash
-H='-H Content-Type:application/json -H X-Tenant-Id:acme'
+TOKEN=<accessToken from auth-service /auth/login>
+H="-H Content-Type:application/json -H Authorization:Bearer\ $TOKEN"
 
-curl -s -X POST localhost:8082/incidents $H -H 'X-Actor: alice' \
+curl -s -X POST localhost:8082/incidents $H \
   -d '{"title":"Checkout API 500s","severity":"SEV2","owner":"alice"}'
 
-curl -s localhost:8082/incidents -H 'X-Tenant-Id: acme'
-curl -s localhost:8082/incidents/$ID -H 'X-Tenant-Id: acme'
+curl -s localhost:8082/incidents -H "Authorization: Bearer $TOKEN"
+curl -s localhost:8082/incidents/$ID -H "Authorization: Bearer $TOKEN"
 
-curl -s -X PATCH localhost:8082/incidents/$ID $H -H 'X-Actor: bob' \
+curl -s -X PATCH localhost:8082/incidents/$ID $H \
   -d '{"status":"INVESTIGATING","owner":"bob"}'
 
-curl -s localhost:8082/incidents/$ID/audit -H 'X-Tenant-Id: acme'
+curl -s localhost:8082/incidents/$ID/audit -H "Authorization: Bearer $TOKEN"
 ```
+
+Tests: `./mvnw test` (in-memory H2, no Docker needed).
 
 ## Audit log design
 - Every POST/PATCH writes `audit_event` rows in the **same transaction** as the change.
