@@ -1,0 +1,326 @@
+{
+  "info": {
+    "name": "Tether Auth Service",
+    "description": "Run the folder top to bottom (Collection Runner works). Step 1 generates fresh emails, so it can be re-run any number of times. Tokens, tenantId and joinCode are saved into collection variables automatically.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "baseUrl",
+      "value": "http://localhost:8081"
+    },
+    {
+      "key": "ownerEmail",
+      "value": ""
+    },
+    {
+      "key": "memberEmail",
+      "value": ""
+    },
+    {
+      "key": "password",
+      "value": "correct-horse-battery"
+    },
+    {
+      "key": "token",
+      "value": ""
+    },
+    {
+      "key": "memberToken",
+      "value": ""
+    },
+    {
+      "key": "tenantId",
+      "value": ""
+    },
+    {
+      "key": "joinCode",
+      "value": ""
+    }
+  ],
+  "item": [
+    {
+      "name": "1. Register owner (creates organization)",
+      "event": [
+        {
+          "listen": "prerequest",
+          "script": {
+            "exec": [
+              "const run = Date.now();",
+              "pm.collectionVariables.set('ownerEmail', `alice+${run}@acme.test`);",
+              "pm.collectionVariables.set('memberEmail', `bob+${run}@acme.test`);"
+            ]
+          }
+        },
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const body = pm.response.json();",
+              "pm.test('caller is OWNER of a new tenant with a join code', () => {",
+              "  pm.expect(body.user.role).to.eql('OWNER');",
+              "  pm.expect(body.tenant.joinCode).to.have.lengthOf(8);",
+              "});",
+              "pm.collectionVariables.set('token', body.accessToken);",
+              "pm.collectionVariables.set('tenantId', body.tenant.id);",
+              "pm.collectionVariables.set('joinCode', body.tenant.joinCode);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"{{password}}\",\n  \"displayName\": \"Alice\",\n  \"organizationName\": \"Acme Corp\"\n}"
+        }
+      }
+    },
+    {
+      "name": "2. Register teammate (joins with join code)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('201 Created', () => pm.response.to.have.status(201));",
+              "const body = pm.response.json();",
+              "pm.test('teammate is MEMBER of the same tenant', () => {",
+              "  pm.expect(body.user.role).to.eql('MEMBER');",
+              "  pm.expect(body.tenant.id).to.eql(pm.collectionVariables.get('tenantId'));",
+              "});",
+              "pm.collectionVariables.set('memberToken', body.accessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{memberEmail}}\",\n  \"password\": \"{{password}}\",\n  \"displayName\": \"Bob\",\n  \"joinCode\": \"{{joinCode}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "3. Login",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const body = pm.response.json();",
+              "const payload = JSON.parse(atob(body.accessToken.split('.')[1].replace(/-/g, '+').replace(/_/g, '/')));",
+              "pm.test('JWT carries userId, tenantId and expiry', () => {",
+              "  pm.expect(payload.userId).to.eql(body.user.id);",
+              "  pm.expect(payload.tenantId).to.eql(pm.collectionVariables.get('tenantId'));",
+              "  pm.expect(payload.exp).to.be.above(payload.iat);",
+              "});",
+              "console.log('JWT payload', payload);",
+              "pm.collectionVariables.set('token', body.accessToken);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"{{password}}\"\n}"
+        }
+      }
+    },
+    {
+      "name": "4. Who am I (uses token)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('same tenant as the token', () => pm.expect(pm.response.json().tenant.id).to.eql(pm.collectionVariables.get('tenantId')));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/me"
+      }
+    },
+    {
+      "name": "4b. Members of my organization",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "pm.test('owner and teammate both listed', () => pm.expect(pm.response.json().length).to.be.at.least(2));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/tenant/members"
+      }
+    },
+    {
+      "name": "4c. Teammate tries to rotate join code (expect 403)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('403 Forbidden', () => pm.response.to.have.status(403));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{memberToken}}"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/tenant/join-code/rotate"
+      }
+    },
+    {
+      "name": "4d. Owner rotates join code",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('200 OK', () => pm.response.to.have.status(200));",
+              "const code = pm.response.json().joinCode;",
+              "pm.test('new code issued', () => pm.expect(code).to.not.eql(pm.collectionVariables.get('joinCode')));",
+              "pm.collectionVariables.set('joinCode', code);"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Authorization",
+            "value": "Bearer {{token}}"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/tenant/join-code/rotate"
+      }
+    },
+    {
+      "name": "5. Login with wrong password (expect 401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/login",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"definitely-wrong\"\n}"
+        }
+      }
+    },
+    {
+      "name": "6. Register same email again (expect 409)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('409 Conflict', () => pm.response.to.have.status(409));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "POST",
+        "header": [
+          {
+            "key": "Content-Type",
+            "value": "application/json"
+          }
+        ],
+        "url": "{{baseUrl}}/auth/register",
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"{{ownerEmail}}\",\n  \"password\": \"{{password}}\",\n  \"displayName\": \"Alice again\",\n  \"organizationName\": \"Another Org\"\n}"
+        }
+      }
+    },
+    {
+      "name": "7. Who am I without token (expect 401)",
+      "event": [
+        {
+          "listen": "test",
+          "script": {
+            "exec": [
+              "pm.test('401 Unauthorized', () => pm.response.to.have.status(401));"
+            ]
+          }
+        }
+      ],
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": "{{baseUrl}}/auth/me"
+      }
+    }
+  ]
+}
