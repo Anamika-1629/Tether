@@ -42,13 +42,26 @@ export default function SharedNotes({ room }) {
   }, [room])
 
   return (
-    <textarea
-      ref={ref}
-      disabled={!room}
-      spellCheck={false}
-      data-testid="shared-notes"
-      placeholder={'Shared notes: everyone in this incident sees edits live.\n\n14:02 Checkout 500s started, ~30% of requests\n14:05 Suspect payments DB connection pool\n(paste logs here)'}
-      className="h-[28rem] w-full resize-y rounded-lg border border-slate-800 bg-slate-900 p-4 font-mono text-sm leading-relaxed text-slate-100 placeholder:text-slate-600 focus:border-slate-600 focus:outline-none disabled:opacity-50"
-    />
+    <div className="relative">
+      {!room && (
+        <div className="absolute inset-0 z-10 flex items-center justify-center rounded-lg bg-slate-950/50 backdrop-blur-sm">
+          <div className="flex items-center gap-2 text-sm text-slate-400">
+            <svg className="h-4 w-4 animate-spin" fill="none" viewBox="0 0 24 24">
+              <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+              <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+            </svg>
+            Connecting to sync…
+          </div>
+        </div>
+      )}
+      <textarea
+        ref={ref}
+        disabled={!room}
+        spellCheck={false}
+        data-testid="shared-notes"
+        placeholder={'Shared notes — everyone in this incident sees edits live.\n\n14:02  Checkout 500s started, ~30% of requests\n14:05  Suspect payments DB connection pool\n\n(paste logs, commands, or findings here)'}
+        className="notes-area"
+      />
+    </div>
   )
 }
