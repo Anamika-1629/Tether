@@ -40,5 +40,6 @@ public class Tenant {
     public String getName() { return name; }
     public String getSlug() { return slug; }
     public String getJoinCode() { return joinCode; }
+    public void setJoinCode(String joinCode) { this.joinCode = joinCode; }
     public Instant getCreatedAt() { return createdAt; }
 }

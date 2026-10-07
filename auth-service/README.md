@@ -22,7 +22,7 @@ Defaults match `docker-compose.yml` (`localhost:5432/incidentsync`, user/pass `i
 
 Flyway creates `tenants` and `users` on first start. Its history table is `auth_schema_history`, so it doesn't clash with the Incident Service on the shared DB. I tested both services running against one database.
 
-Tests (no DB or Docker needed; they use in-memory H2 in PostgreSQL mode): `./mvnw test`
+Tests: `./mvnw test` runs 30 tests. No DB or Docker needed; they use in-memory H2 in PostgreSQL mode. GitHub Actions runs them on every PR that touches `auth-service/`.
 
 ## Endpoints
 | Method | Path | Auth | Notes |
@@ -30,7 +30,11 @@ Tests (no DB or Docker needed; they use in-memory H2 in PostgreSQL mode): `./mvn
 | POST | `/auth/register` | public | `email`, `password` (8–72 chars), `displayName`, and **exactly one of** `organizationName` (create a new org, you become `OWNER`) or `joinCode` (join an existing org as `MEMBER`). Returns 201 + token. |
 | POST | `/auth/login` | public | `email`, `password`. Returns 200 + token. |
 | GET | `/auth/me` | Bearer | Current user + tenant. Useful to check a token. |
+| GET | `/auth/tenant/members` | Bearer | Everyone in **your** tenant (id, email, displayName, role). For the frontend's "assign owner" picker (FR7). Never shows other tenants. |
+| POST | `/auth/tenant/join-code/rotate` | Bearer, OWNER | Issues a new join code; the old one stops working immediately. Members get 403. |
 | GET | `/actuator/health` | public | `{"status":"UP"}` |
+| GET | `/actuator/prometheus` | public | Metrics for Prometheus/Grafana (see below) |
+| GET | `/swagger-ui.html` | public | Interactive API docs. Click **Authorize** and paste an `accessToken` to try the protected endpoints. |
 
 Successful register/login response:
 ```json
@@ -51,7 +55,9 @@ Errors are always `{"error": "..."}` (validation errors add `"fields": {...}`):
 |---|---|
 | 400 | validation failed, both/neither of `organizationName`/`joinCode`, unknown join code |
 | 401 | wrong email or password (same message for both), missing/invalid/expired token |
+| 403 | a MEMBER tried an OWNER-only action |
 | 409 | email already registered (case-insensitive) |
+| 429 | too many failed logins or join-code guesses; a `Retry-After` header gives the seconds to wait |
 
 ## Try it
 **Postman:** import `postman/tether-auth-service.postman_collection.json` and run the folder top to bottom. It registers an owner, has a teammate join with the join code, logs in, calls `/auth/me`, and checks the 401/409 cases. Variables are saved for you, and it can be re-run as often as you like.
@@ -142,11 +148,27 @@ Signature, expiry and issuer are then checked on every request, and a bad token 
 - **Emails** are trimmed and lower-cased before storing or looking up, so `Alice@Acme.test` and `alice@acme.test` are the same account.
 - **Join codes:** 8 characters from an alphabet without `0/O/1/I`, generated with `SecureRandom`, case-insensitive when entered.
 - **Race safety:** the unique constraint on `email` is the real guard. If two registrations race, the loser gets a 409, not a 500.
-- **Fail fast:** the service refuses to start with a JWT secret shorter than 32 bytes.
+- **Fail fast:** the service refuses to start with a JWT secret shorter than 32 bytes, and logs a warning at startup while the built-in dev secret is in use.
+- **Brute-force protection:**
+  - After 5 failed logins for one email from one client IP within 15 minutes, that pair gets 429 until the window ends, even with the right password. A successful login resets the count. Keying on IP + email means an attacker can't lock a real user out from somewhere else.
+  - After 10 wrong join codes from one IP within 15 minutes, that IP gets 429.
+  - The limits are set by `tether.rate-limit.*` in `application.properties`.
+  - Counts are kept in memory per instance. Move them to Redis when the service is scaled out. Behind a load balancer, configure forwarded headers so the real client IP is used.
+- **Join code rotation:** if a join code leaks, the OWNER replaces it. The authorization check reads the role from the database, not the token, so a demoted user's old token can't rotate the code.
+
+## Metrics
+`/actuator/prometheus` exposes the standard JVM/HTTP metrics plus:
+
+| Metric | Labels | Use |
+|---|---|---|
+| `tether_auth_logins_total` | `outcome` = `success` / `failure` / `blocked` | Login success rate; spikes in `failure` or `blocked` mean someone is guessing passwords |
+| `tether_auth_registrations_total` | `type` = `new_org` / `join_code` | Sign-up activity |
+| `tether_auth_join_code_rejections_total` | `reason` = `invalid` / `blocked` | Join-code guessing |
+
+Every merged change to `auth-service/` is built and tested by `.github/workflows/auth-service.yml`.
 
 ## Deferred (per Review 2 scope)
 - Full RBAC: only `OWNER`/`MEMBER` is stored and put in the token.
 - Password reset, email verification, refresh tokens.
-- Rate limiting on `/auth/login` and on join-code guessing.
 - Dockerfile.
 - Moving to RS256 + a JWKS endpoint, so other services hold only a public key instead of the shared secret.

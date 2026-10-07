@@ -2,8 +2,10 @@ package com.tether.auth.web;
 
 import com.tether.auth.service.ApiException;
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.Map;
 import org.springframework.dao.DataIntegrityViolationException;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.http.converter.HttpMessageNotReadableException;
@@ -15,7 +17,13 @@ public class ApiExceptionHandler {
 
     @ExceptionHandler(ApiException.class)
     ResponseEntity<Map<String, String>> api(ApiException e) {
-        return ResponseEntity.status(e.getStatus()).body(Map.of("error", e.getMessage()));
+        ResponseEntity.BodyBuilder response = ResponseEntity.status(e.getStatus());
+        if (e.getRetryAfter() != null) {
+            // Round up so clients never retry a moment too early
+            long seconds = Math.max(1, e.getRetryAfter().toSeconds() + (e.getRetryAfter().toNanosPart() > 0 ? 1 : 0));
+            response.header(HttpHeaders.RETRY_AFTER, String.valueOf(seconds));
+        }
+        return response.body(Map.of("error", e.getMessage()));
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)
@@ -32,10 +40,16 @@ public class ApiExceptionHandler {
         return Map.of("error", "Malformed JSON request body");
     }
 
-    /** Two registrations racing on the same email: the second one loses at the unique constraint. */
+    /**
+     * A request lost a race at a unique constraint. Usually two registrations with the same email;
+     * rarely two new tenants drawing the same slug or join code, which is safe to retry.
+     */
     @ExceptionHandler(DataIntegrityViolationException.class)
     @ResponseStatus(HttpStatus.CONFLICT)
     Map<String, String> conflict(DataIntegrityViolationException e) {
-        return Map.of("error", "An account with this email already exists");
+        String cause = String.valueOf(e.getMostSpecificCause().getMessage()).toLowerCase(Locale.ROOT);
+        return Map.of("error", cause.contains("uq_users_email")
+                ? "An account with this email already exists"
+                : "Conflicting update, please retry");
     }
 }
