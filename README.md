@@ -42,9 +42,9 @@ The incident tool must never become the next point of failure, so Tether is hori
 | 📋 **Incident management** | Create incidents and update status, severity and owner, all scoped to your organization. | ✅ Live |
 | 🧾 **Append-only audit trail** | Every change is recorded in order (who, what, old → new, when). The database itself rejects edits or deletes. | ✅ Live |
 | 🛡️ **Brute-force protection** | Failed logins and join-code guesses are rate limited (HTTP 429). | ✅ Live |
-| ✍️ **Conflict-free collaborative timeline** | Many responders edit the same timeline at once, and concurrent edits merge automatically (Yjs CRDT). | 🚧 Planned |
-| 📴 **Offline resilience** | Edits made while disconnected are kept locally and merge cleanly on reconnect. | 🚧 Planned |
-| 👥 **Live presence** | See who is viewing or editing an incident right now. | 🚧 Planned |
+| ✍️ **Conflict-free collaborative timeline** | Many responders edit the same timeline at once, and concurrent edits merge automatically (Yjs CRDT). | 🟡 Works with the dev sync server |
+| 📴 **Offline resilience** | Edits made while disconnected are kept locally and merge cleanly on reconnect. | 🟡 Works with the dev sync server |
+| 👥 **Live presence** | See who is viewing or editing an incident right now. | 🟡 Works with the dev sync server |
 | 📈 **Self-observability** | Sync latency, active sessions and reconnect success rate on Grafana dashboards. | 🟡 Auth metrics live |
 
 ## 🏗 Architecture
@@ -97,7 +97,7 @@ sequenceDiagram
 
 ## 🚀 Quick start
 
-**Prerequisites:** Java 17, Docker (for local Postgres/Redis), and optionally Node 18+ for the frontend later.
+**Prerequisites:** Java 17, Node 18+, Docker (for local Postgres/Redis).
 
 ```bash
 # 1. Clone and start local infrastructure
@@ -108,7 +108,13 @@ docker compose up -d postgres redis
 # 2. Start the services, each in its own terminal
 cd auth-service && ./mvnw spring-boot:run        # http://localhost:8081
 cd incident-service && ./mvnw spring-boot:run    # http://localhost:8082
+
+# 3. Start the frontend and the dev Sync Service
+cd frontend && npm install && npm run dev:sync   # ws://localhost:8083 (stand-in until sync-service lands)
+cd frontend && npm run dev                       # http://localhost:3000
 ```
+
+Open **http://localhost:3000**, create an account, and declare an incident. Open a second tab, join with the code shown in the header, and both tabs share live notes and presence. The full 3-minute demo script is in [frontend/README.md](frontend/README.md#demo-script-two-responders-about-3-minutes).
 
 Both services ship with the same **dev-only** JWT secret, so they work together locally with no setup. For anything shared, set `JWT_SECRET` (see [Configuration](#-configuration)).
 
@@ -128,7 +134,7 @@ curl -s -X POST localhost:8082/incidents -H "Authorization: Bearer $TOKEN" -H 'C
 curl -s localhost:8082/incidents -H "Authorization: Bearer $TOKEN"
 ```
 
-> 💡 Prefer clicking? Open **http://localhost:8081/swagger-ui.html**, or import the Postman collections in `auth-service/postman/` and `incident-service/postman/`.
+> 💡 Prefer exploring the APIs directly? Open **http://localhost:8081/swagger-ui.html**, or import the Postman collections in `auth-service/postman/` and `incident-service/postman/`.
 
 ## 🧩 Services
 
@@ -136,8 +142,8 @@ curl -s localhost:8082/incidents -H "Authorization: Bearer $TOKEN"
 |---|:---:|---|:---:|---|
 | 🔐 **Auth / Tenant** | 8081 | Signup, login, JWT issuing, organizations, join codes, members (FR6) | ✅ Working | [README](auth-service/README.md) |
 | 📋 **Incident / Timeline** | 8082 | Incident CRUD, status/severity/owner, append-only audit log (FR1, FR5, FR7) | ✅ Working | [README](incident-service/README.md) |
-| 🔄 **Sync** | 8083 | WebSocket/STOMP, Yjs document sync, presence via Redis (FR2–FR4) | 🚧 Pending | — |
-| 🖥️ **Frontend** | 3000 | React + Yjs client | 🚧 Pending | — |
+| 🔄 **Sync** | 8083 | WebSocket, Yjs document sync, presence via Redis (FR2–FR4) | 🚧 Pending (dev stand-in in `frontend/sync-dev-server`) | [Contract](frontend/README.md#sync-service-contract) |
+| 🖥️ **Frontend** | 3000 | Login, incident list, live incident room: shared notes, presence, offline mode | ✅ Working | [README](frontend/README.md) |
 
 Shared infrastructure (Supabase Postgres, Upstash Redis) is described in [service-config.md](service-config.md).
 
@@ -173,13 +179,14 @@ Copy `.env.example` to `.env` and fill it in. Never commit `.env`.
 Tether/
 ├── auth-service/           # 🔐 Auth / Tenant service (Spring Boot, :8081)
 ├── incident-service/       # 📋 Incident / Timeline service (Spring Boot, :8082)
+├── frontend/               # 🖥️ React + Yjs incident room (:3000) and the dev Sync Service
 ├── .github/workflows/      # CI pipelines
 ├── docker-compose.yml      # Local Postgres + Redis
 ├── service-config.md       # Ports and shared infrastructure
 └── .env.example            # Environment variables template
 ```
 
-Coming next: `sync-service/`, `frontend/`, `infra/terraform/`, `observability/`.
+Coming next: `sync-service/`, `infra/terraform/`, `observability/`.
 
 ## 📋 Requirements
 
@@ -189,12 +196,12 @@ Coming next: `sync-service/`, `frontend/`, `infra/terraform/`, `observability/`.
 | ID | Requirement | Status |
 |---|---|:---:|
 | FR1 | Users can create an incident and add it to a shared timeline | ✅ |
-| FR2 | Multiple users can edit timeline entries concurrently without overwriting each other | 🚧 |
-| FR3 | Offline edits are queued locally and merge automatically on reconnect | 🚧 |
-| FR4 | Users can see who else is active on an incident (presence) | 🚧 |
+| FR2 | Multiple users can edit timeline entries concurrently without overwriting each other | 🟡 Frontend done, Sync Service pending |
+| FR3 | Offline edits are queued locally and merge automatically on reconnect | 🟡 Frontend done, Sync Service pending |
+| FR4 | Users can see who else is active on an incident (presence) | 🟡 Frontend done, Sync Service pending |
 | FR5 | Every change is recorded as an immutable, ordered event for audit and postmortem | ✅ |
 | FR6 | Users log in and are scoped to their organization (multi-tenancy) | ✅ |
-| FR7 | Status, ownership and severity can be updated and reflected to all clients in real time | 🟡 REST done, real-time pending |
+| FR7 | Status, ownership and severity can be updated and reflected to all clients in real time | 🟡 Instant via the sync channel (dev server today), 20 s refresh fallback |
 
 </details>
 
@@ -203,7 +210,7 @@ Coming next: `sync-service/`, `frontend/`, `infra/terraform/`, `observability/`.
 
 | ID | Requirement | Status |
 |---|---|:---:|
-| NFR1 | Usable during partial network failure, with no data loss on disconnect/reconnect | 🚧 |
+| NFR1 | Usable during partial network failure, with no data loss on disconnect/reconnect | 🟡 Client side done (IndexedDB + merge on reconnect) |
 | NFR2 | Sync latency observable via Prometheus/Grafana | 🟡 Metrics endpoint on auth |
 | NFR3 | Horizontally scalable: stateless services, session state in Redis | 🟡 Services are stateless (JWT) |
 | NFR4 | Infrastructure as code (Terraform), deployed through CI/CD | 🚧 |
@@ -217,11 +224,11 @@ Coming next: `sync-service/`, `frontend/`, `infra/terraform/`, `observability/`.
 - [x] Append-only audit log
 - [x] Auth / Tenant Service: signup, login, JWT, organizations
 - [x] JWT validation in the Incident Service (tenant comes from the token)
-- [x] CI for the Auth Service (GitHub Actions)
+- [x] Frontend: login, incident list, live incident room (React + Yjs)
+- [x] CI for the Auth Service and the frontend (GitHub Actions)
 - [ ] WebSocket/STOMP sync layer with Yjs
 - [ ] Presence via Redis Pub/Sub
 - [ ] Postmortem export from the audit log
-- [ ] Frontend (React + Yjs)
 - [ ] Dockerfiles for every service, full `docker compose up`
 - [ ] Terraform for AWS
 - [ ] Prometheus/Grafana dashboards (sync latency, active sessions, reconnect rate)
