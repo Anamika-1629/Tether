@@ -6,7 +6,7 @@ This document contains the shared service configuration and infrastructure detai
 
 | Service | Port | Base URL | Status |
 |---|---:|---|---|
-| Frontend | 3000 | `http://localhost:3000` | Pending |
+| Frontend | 3000 | `http://localhost:3000` | Working (tested locally) |
 | Auth Service | 8081 | `http://localhost:8081` | Working (tested locally) |
 | Incident Service | 8082 | `http://localhost:8082` | Working |
 | Sync Service | 8083 | `http://localhost:8083` | Pending |
@@ -43,5 +43,5 @@ Upstash provides the shared Redis instance intended for the services requiring R
 - [x] Upstash Redis instance configured
 - [ ] Auth Service connected to shared infrastructure
 - [ ] Sync Service connected to shared infrastructure
-- [ ] Frontend connected to all backend services
+- [x] Frontend connected to Auth and Incident services (Sync Service via the dev stand-in in `frontend/sync-dev-server` until the real one lands)
 - [ ] End-to-end integration testing
