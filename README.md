@@ -142,7 +142,7 @@ curl -s localhost:8082/incidents -H "Authorization: Bearer $TOKEN"
 |---|:---:|---|:---:|---|
 | 🔐 **Auth / Tenant** | 8081 | Signup, login, JWT issuing, organizations, join codes, members (FR6) | ✅ Working | [README](auth-service/README.md) |
 | 📋 **Incident / Timeline** | 8082 | Incident CRUD, status/severity/owner, append-only audit log (FR1, FR5, FR7) | ✅ Working | [README](incident-service/README.md) |
-| 🔄 **Sync** | 8083 | WebSocket, Yjs document sync, presence via Redis (FR2–FR4) | 🚧 Pending (dev stand-in in `frontend/sync-dev-server`) | [Contract](frontend/README.md#sync-service-contract) |
+| 🔄 **Sync** | 8083 | WebSocket, Yjs document sync, presence via Redis (FR2–FR4) | ✅ Working | [README](sync-service/README.md) |
 | 🖥️ **Frontend** | 3000 | Login, incident list, live incident room: shared notes, presence, offline mode | ✅ Working | [README](frontend/README.md) |
 
 Shared infrastructure (Supabase Postgres, Upstash Redis) is described in [service-config.md](service-config.md).
@@ -154,11 +154,11 @@ Copy `.env.example` to `.env` and fill it in. Never commit `.env`.
 | Variable | Used by | Default | Notes |
 |---|---|---|---|
 | `DB_URL` / `DB_USER` / `DB_PASSWORD` | auth, incident | local `incidentsync` DB | Point at the shared Supabase instance |
-| `JWT_SECRET` | auth, incident | dev-only value | **Must be identical in every service.** At least 32 bytes, e.g. `openssl rand -base64 48` |
-| `JWT_ISSUER` | auth, incident | `tether-auth` | |
+| `JWT_SECRET` | auth, incident, sync | dev-only value | **Must be identical in every service.** At least 32 bytes, e.g. `openssl rand -base64 48` |
+| `JWT_ISSUER` | auth, incident, sync | `tether-auth` | |
 | `JWT_TTL` | auth | `PT1H` | Token lifetime (ISO-8601 duration) |
-| `CORS_ALLOWED_ORIGINS` | auth, incident | `localhost:3000`, `localhost:5173` | Frontend origins |
-| `REDIS_URL` | sync | — | Upstash Redis |
+| `CORS_ALLOWED_ORIGINS` | auth, incident, sync | `localhost:3000`, `localhost:5173` | Frontend origins |
+| `REDIS_HOST` / `REDIS_PORT` / `REDIS_URL` | sync | `localhost:6379` | Upstash or local Redis Pub/Sub |
 
 ## 🛠 Tech stack
 
@@ -179,14 +179,13 @@ Copy `.env.example` to `.env` and fill it in. Never commit `.env`.
 Tether/
 ├── auth-service/           # 🔐 Auth / Tenant service (Spring Boot, :8081)
 ├── incident-service/       # 📋 Incident / Timeline service (Spring Boot, :8082)
+├── sync-service/           # 🔄 Real-time Sync & Presence service (Spring Boot, :8083)
 ├── frontend/               # 🖥️ React + Yjs incident room (:3000) and the dev Sync Service
 ├── .github/workflows/      # CI pipelines
 ├── docker-compose.yml      # Local Postgres + Redis
 ├── service-config.md       # Ports and shared infrastructure
 └── .env.example            # Environment variables template
 ```
-
-Coming next: `sync-service/`, `infra/terraform/`, `observability/`.
 
 ## 📋 Requirements
 
@@ -196,12 +195,12 @@ Coming next: `sync-service/`, `infra/terraform/`, `observability/`.
 | ID | Requirement | Status |
 |---|---|:---:|
 | FR1 | Users can create an incident and add it to a shared timeline | ✅ |
-| FR2 | Multiple users can edit timeline entries concurrently without overwriting each other | 🟡 Frontend done, Sync Service pending |
-| FR3 | Offline edits are queued locally and merge automatically on reconnect | 🟡 Frontend done, Sync Service pending |
-| FR4 | Users can see who else is active on an incident (presence) | 🟡 Frontend done, Sync Service pending |
+| FR2 | Multiple users can edit timeline entries concurrently without overwriting each other | ✅ Working |
+| FR3 | Offline edits are queued locally and merge automatically on reconnect | ✅ Working |
+| FR4 | Users can see who else is active on an incident (presence) | ✅ Working |
 | FR5 | Every change is recorded as an immutable, ordered event for audit and postmortem | ✅ |
 | FR6 | Users log in and are scoped to their organization (multi-tenancy) | ✅ |
-| FR7 | Status, ownership and severity can be updated and reflected to all clients in real time | 🟡 Instant via the sync channel (dev server today), 20 s refresh fallback |
+| FR7 | Status, ownership and severity can be updated and reflected to all clients in real time | ✅ Working |
 
 </details>
 
