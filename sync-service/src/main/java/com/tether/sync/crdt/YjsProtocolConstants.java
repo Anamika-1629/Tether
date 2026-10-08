@@ -31,4 +31,8 @@ public final class YjsProtocolConstants {
     // WebSocket custom close codes
     public static final int CLOSE_UNAUTHORIZED = 4401;
     public static final int CLOSE_FORBIDDEN = 4403;
+
+    // Standard code 1013 "Try Again Later". Deliberately NOT 44xx: the frontend stops retrying on 44xx,
+    // but a temporary failure to verify access (incident service down) should be retried.
+    public static final int CLOSE_TRY_AGAIN_LATER = 1013;
 }

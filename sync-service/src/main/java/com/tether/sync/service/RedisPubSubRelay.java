@@ -1,8 +1,6 @@
 package com.tether.sync.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.tether.sync.crdt.VarUintUtils;
-import com.tether.sync.crdt.YjsProtocolConstants;
 import com.tether.sync.model.RedisSyncMessage;
 import com.tether.sync.model.Room;
 import org.slf4j.Logger;
@@ -15,7 +13,6 @@ import org.springframework.stereotype.Service;
 import org.springframework.web.socket.BinaryMessage;
 import org.springframework.web.socket.WebSocketSession;
 
-import java.nio.ByteBuffer;
 import java.util.Base64;
 import java.util.UUID;
 
@@ -92,22 +89,8 @@ public class RedisPubSubRelay implements MessageListener {
 
             byte[] payload = Base64.getDecoder().decode(syncMsg.payloadBase64());
 
-            // If it's a sync update, also keep it in the room's history
-            if (syncMsg.messageType() == YjsProtocolConstants.MESSAGE_SYNC) {
-                try {
-                    ByteBuffer buf = ByteBuffer.wrap(payload);
-                    int type = VarUintUtils.readVarUint(buf);
-                    if (type == YjsProtocolConstants.MESSAGE_SYNC) {
-                        int syncType = VarUintUtils.readVarUint(buf);
-                        if (syncType == YjsProtocolConstants.SYNC_UPDATE || syncType == YjsProtocolConstants.SYNC_STEP2) {
-                            byte[] update = VarUintUtils.readVarUint8Array(buf);
-                            room.appendUpdate(update);
-                        }
-                    }
-                } catch (Exception ex) {
-                    log.debug("Could not parse sync update for room history: {}", ex.getMessage());
-                }
-            }
+            // History is NOT recorded here: the instance that received the edit already wrote it to the
+            // shared UpdateLogStore before publishing, so every instance sees the same log.
 
             // Relay to all local WebSocket sessions in this room
             BinaryMessage binMsg = new BinaryMessage(payload);

@@ -4,12 +4,13 @@ import org.springframework.web.socket.WebSocketSession;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.CopyOnWriteArrayList;
+import java.util.concurrent.atomic.AtomicLong;
 
 /**
  * Represents an active collaborative incident room.
- * Holds active WebSocket sessions, ordered Yjs CRDT updates log,
- * and current awareness clocks per session.
+ * Holds active WebSocket sessions and current awareness clocks per session.
+ * The Yjs update history is NOT kept here: it lives in the shared UpdateLogStore, so a room
+ * costs almost nothing in memory and is dropped as soon as its last session leaves.
  */
 public class Room {
 
@@ -18,7 +19,8 @@ public class Room {
     private final String incidentId;
 
     private final Set<WebSocketSession> sessions = ConcurrentHashMap.newKeySet();
-    private final List<byte[]> updates = new CopyOnWriteArrayList<>();
+    /** Epoch millis when a compaction was requested from one of this instance's sessions; 0 = none. */
+    private final AtomicLong compactionStartedAt = new AtomicLong();
     private final Map<String, Map<Long, Long>> sessionAwareness = new ConcurrentHashMap<>();
 
     public Room(String tenantId, String incidentId) {
@@ -43,10 +45,6 @@ public class Room {
         return sessions;
     }
 
-    public List<byte[]> getUpdates() {
-        return updates;
-    }
-
     public void addSession(WebSocketSession session) {
         sessions.add(session);
         sessionAwareness.put(session.getId(), new ConcurrentHashMap<>());
@@ -64,8 +62,15 @@ public class Room {
         return sessionAwareness.remove(sessionId);
     }
 
-    public void appendUpdate(byte[] update) {
-        updates.add(update);
+    /** True if this instance may start a compaction now. A stuck attempt is retried after {@code timeoutMs}. */
+    public boolean tryBeginCompaction(long nowMs, long timeoutMs) {
+        long started = compactionStartedAt.get();
+        if (started != 0 && nowMs - started < timeoutMs) return false;
+        return compactionStartedAt.compareAndSet(started, nowMs);
+    }
+
+    public void endCompaction() {
+        compactionStartedAt.set(0);
     }
 
     public boolean isEmpty() {
