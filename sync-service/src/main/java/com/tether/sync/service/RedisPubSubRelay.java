@@ -31,13 +31,17 @@ public class RedisPubSubRelay implements MessageListener {
     private final RoomManager roomManager;
     private final ObjectMapper objectMapper;
     private final String topic;
-    private boolean redisAvailable = true;
+    private final long retryCooldownMs;
+    /** 0 means publishing is allowed. Otherwise do not try Redis again before this time (epoch ms). */
+    private volatile long nextRetryAtMs = 0;
 
     public RedisPubSubRelay(
             StringRedisTemplate redisTemplate,
             RoomManager roomManager,
             ObjectMapper objectMapper,
-            @Value("${tether.sync.redis-topic:tether:sync:events}") String topic) {
+            @Value("${tether.sync.redis-topic:tether:sync:events}") String topic,
+            @Value("${tether.sync.redis-retry-cooldown-ms:5000}") long retryCooldownMs) {
+        this.retryCooldownMs = retryCooldownMs;
         this.redisTemplate = redisTemplate;
         this.roomManager = roomManager;
         this.objectMapper = objectMapper;
@@ -53,7 +57,8 @@ public class RedisPubSubRelay implements MessageListener {
      * Publishes a raw binary frame to Redis for cross-node replication.
      */
     public void publish(String roomKey, int messageType, byte[] payload) {
-        if (!redisAvailable) {
+        long now = System.currentTimeMillis();
+        if (now < nextRetryAtMs) {
             return;
         }
 
@@ -62,9 +67,16 @@ public class RedisPubSubRelay implements MessageListener {
             RedisSyncMessage syncMessage = new RedisSyncMessage(instanceId, roomKey, messageType, b64);
             String json = objectMapper.writeValueAsString(syncMessage);
             redisTemplate.convertAndSend(topic, json);
+            if (nextRetryAtMs != 0) {
+                nextRetryAtMs = 0;
+                log.info("Redis publish recovered, cross-instance relay resumed");
+            }
         } catch (Exception e) {
-            log.warn("Redis publish failed (will continue locally): {}", e.getMessage());
-            redisAvailable = false;
+            if (nextRetryAtMs == 0) {
+                log.warn("Redis publish failed, relaying locally only and retrying every {} ms: {}",
+                        retryCooldownMs, e.getMessage());
+            }
+            nextRetryAtMs = now + retryCooldownMs;
         }
     }
 

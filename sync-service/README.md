@@ -82,6 +82,10 @@ Configured via environment variables with sane defaults for local development:
 | `REDIS_HOST` | `localhost` | Redis host for Pub/Sub |
 | `REDIS_PORT` | `6379` | Redis port |
 | `SYNC_REDIS_TOPIC` | `tether:sync:events` | Redis Pub/Sub topic name |
+| `REDIS_SSL` | `false` | Set `true` for TLS (Upstash) |
+| `REDIS_TIMEOUT_MS` | `2000` | Redis command timeout |
+| `REDIS_CONNECT_TIMEOUT_MS` | `2000` | Redis connect timeout |
+| `SYNC_REDIS_RETRY_COOLDOWN_MS` | `5000` | Wait this long after a failed publish before retrying |
 | `SYNC_HEARTBEAT_INTERVAL_MS` | `10000` | How often every open session is pinged |
 | `SYNC_HEARTBEAT_TIMEOUT_MS` | `30000` | A session silent for longer than this is dropped |
 | `CORS_ALLOWED_ORIGINS` | `http://localhost:3000,http://localhost:5173` | Allowed WebSocket origins |
@@ -118,7 +122,7 @@ Each room's Yjs history is a Redis list (`tether:sync:room:{tenantId}:{incidentI
 
 **Compaction.** The server cannot merge Yjs updates itself, so when a log reaches `tether.sync.compact-threshold` entries (default 200) it asks one connected client for its full document (a Sync Step 1 with an empty state vector, which y-websocket clients answer with the whole doc). That snapshot atomically replaces everything except the newest `compact-keep-tail` (default 25) entries. Only one compaction runs per room at a time (Redis lock), and Yjs updates are idempotent, so keeping an entry the snapshot already contains is harmless.
 
-**If Redis is down.** Live relay between already-connected clients keeps working on that instance, but edits are not stored and new joiners get no history. Clients re-upload their own state when they reconnect, so the document heals from any client that still has it. Use `tether.sync.store=memory` to run without Redis at all (history is then lost on restart and not shared).
+**If Redis is down.** Live relay between already-connected clients keeps working on that instance, but edits are not stored and new joiners get no history. Clients re-upload their own state when they reconnect, so the document heals from any client that still has it. Relay resumes automatically within a few seconds of Redis coming back, but Pub/Sub messages sent during the outage are not replayed. Use `tether.sync.store=memory` to run without Redis at all (history is then lost on restart and not shared).
 
 | Variable | Default | Meaning |
 |---|---|---|
