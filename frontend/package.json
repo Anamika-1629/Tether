@@ -5,7 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "dev:sync": "node sync-dev-server/server.js",
+    "dev:sync-legacy": "node sync-dev-server/server.js",
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run"

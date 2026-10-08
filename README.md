@@ -42,10 +42,10 @@ The incident tool must never become the next point of failure, so Tether is hori
 | 📋 **Incident management** | Create incidents and update status, severity and owner, all scoped to your organization. | ✅ Live |
 | 🧾 **Append-only audit trail** | Every change is recorded in order (who, what, old → new, when). The database itself rejects edits or deletes. | ✅ Live |
 | 🛡️ **Brute-force protection** | Failed logins and join-code guesses are rate limited (HTTP 429). | ✅ Live |
-| ✍️ **Conflict-free collaborative timeline** | Many responders edit the same timeline at once, and concurrent edits merge automatically (Yjs CRDT). | 🟡 Works with the dev sync server |
-| 📴 **Offline resilience** | Edits made while disconnected are kept locally and merge cleanly on reconnect. | 🟡 Works with the dev sync server |
-| 👥 **Live presence** | See who is viewing or editing an incident right now. | 🟡 Works with the dev sync server |
-| 📈 **Self-observability** | Sync latency, active sessions and reconnect success rate on Grafana dashboards. | 🟡 Auth metrics live |
+| ✍️ **Conflict-free collaborative timeline** | Many responders edit the same timeline at once, and concurrent edits merge automatically (Yjs CRDT). | ✅ Live (sync-service) |
+| 📴 **Offline resilience** | Edits made while disconnected are kept locally and merge cleanly on reconnect. | ✅ Live (sync-service) |
+| 👥 **Live presence** | See who is viewing or editing an incident right now. | ✅ Live (sync-service) |
+| 📈 **Self-observability** | Sync latency, active sessions and reconnect success rate on Grafana dashboards. | 🟡 Auth and sync metrics live, dashboards planned |
 
 ## 🏗 Architecture
 
@@ -108,10 +108,10 @@ docker compose up -d postgres redis
 # 2. Start the services, each in its own terminal
 cd auth-service && ./mvnw spring-boot:run        # http://localhost:8081
 cd incident-service && ./mvnw spring-boot:run    # http://localhost:8082
+cd sync-service && ./mvnw spring-boot:run        # ws://localhost:8083 (start after incident-service)
 
-# 3. Start the frontend and the dev Sync Service
-cd frontend && npm install && npm run dev:sync   # ws://localhost:8083 (stand-in until sync-service lands)
-cd frontend && npm run dev                       # http://localhost:3000
+# 3. Start the frontend
+cd frontend && npm install && npm run dev        # http://localhost:3000
 ```
 
 Open **http://localhost:3000**, create an account, and declare an incident. Open a second tab, join with the code shown in the header, and both tabs share live notes and presence. The full 3-minute demo script is in [frontend/README.md](frontend/README.md#demo-script-two-responders-about-3-minutes).
@@ -180,7 +180,7 @@ Tether/
 ├── auth-service/           # 🔐 Auth / Tenant service (Spring Boot, :8081)
 ├── incident-service/       # 📋 Incident / Timeline service (Spring Boot, :8082)
 ├── sync-service/           # 🔄 Real-time Sync & Presence service (Spring Boot, :8083)
-├── frontend/               # 🖥️ React + Yjs incident room (:3000) and the dev Sync Service
+├── frontend/               # 🖥️ React + Yjs incident room (:3000)
 ├── .github/workflows/      # CI pipelines
 ├── docker-compose.yml      # Local Postgres + Redis
 ├── service-config.md       # Ports and shared infrastructure

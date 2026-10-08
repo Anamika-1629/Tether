@@ -134,6 +134,19 @@ Each room's Yjs history is a Redis list (`tether:sync:room:{tenantId}:{incidentI
 
 ---
 
+## Metrics (NFR2)
+
+Exposed at `/actuator/prometheus` (Micrometer). All series carry an `application="sync-service"` tag.
+
+| Series | Type | Meaning |
+|---|---|---|
+| `tether_sync_sessions_active` | gauge | Open responder connections that joined a room |
+| `tether_sync_relay_latency_seconds` (`_count`, `_sum`, `_bucket`) | timer | Time to store one document update and fan it out to the room and Redis. Server side only, not end to end |
+| `tether_sync_reconnects_total` | counter | A responder rejoined the same room within 60 s of leaving it |
+| `tether_sync_rejections_total{reason}` | counter | Connections refused: `unauthorized` (4401), `forbidden` (4403), `unavailable` (1013), `bad_request` |
+
+Check: `curl -s localhost:8083/actuator/prometheus | grep tether_sync`. The relay and reconnect series appear after the first edit and the first rejoin.
+
 ## 4. Running the Service
 
 ### Using Maven
