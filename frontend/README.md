@@ -18,10 +18,10 @@ npm run dev          # http://localhost:3000
 
 No `.env` is needed: every URL has a localhost default (see [`.env.example`](.env.example) to point elsewhere).
 
-The Sync Service isn't built yet, so this folder includes a **development stand-in** that implements the same contract:
+Real-time sync comes from the Java `sync-service` (start it after the Incident Service):
 
 ```bash
-npm run dev:sync     # ws://localhost:8083/sync (needs the Incident Service running, for access checks)
+cd sync-service && ./mvnw spring-boot:run     # ws://localhost:8083/sync
 ```
 
 Without it the app still works. Notes are saved in the browser and the badge says **Offline** until a Sync Service is reachable, after which they merge automatically.
@@ -29,8 +29,8 @@ Without it the app still works. Notes are saved in the browser and the badge say
 | Command | What it does |
 |---|---|
 | `npm run dev` | Frontend with hot reload on :3000 |
-| `npm run dev:sync` | Development Sync Service on :8083 |
-| `npm test` | 19 tests: textarea↔Yjs binding, plus the sync server with real Yjs clients (live edits, concurrent edits, offline merge, presence, auth) |
+| `npm run dev:sync-legacy` | Legacy Node reference server on :8083. Only for working without Java. **Never run it together with `sync-service`** (same port) |
+| `npm test` | 19 tests: textarea↔Yjs binding, plus the legacy Node reference server with real Yjs clients (live edits, concurrent edits, offline merge, presence, auth) |
 | `npm run build` | Production build into `dist/` |
 
 ## What's on screen
@@ -54,20 +54,20 @@ The tool is used while production is on fire, so every choice favors "keeps work
 
 ## Demo script (two responders, about 3 minutes)
 
-Start Postgres, `auth-service`, `incident-service`, then `npm run dev:sync` and `npm run dev`.
+Start Postgres (and Redis), `auth-service`, `incident-service`, `sync-service`, then `npm run dev`.
 
 1. **Tab 1:** Create account → "New organization" → *Alice, Acme Corp*. Note the **join code** in the header.
 2. **Tab 1:** Declare *"Checkout API returning 500s"*, SEV2. You land in the incident room: *1 responder active, Live*.
 3. **Tab 2** (a new tab is a separate session): Create account → "Join with code" → *Bob* + the code. Open the same incident (from the list).
 4. Both tabs show **2 responders active**. Type in Bob's notes and watch it appear in Alice's tab as you type.
 5. In Bob's tab, set status **INVESTIGATING** and owner **Bob**. Alice's tab updates by itself, and the timeline shows who changed what.
-6. **Outage drill:** stop `npm run dev:sync` (Ctrl+C). Alice's badge turns **Offline**; she keeps typing; reload the page and her notes are still there. Restart `npm run dev:sync` and Bob receives everything she wrote.
+6. **Outage drill:** stop `sync-service` (Ctrl+C). Alice's badge turns **Offline**; she keeps typing; reload the page and her notes are still there. Restart `sync-service` and Bob receives everything she wrote.
 
 All six steps were run end to end against the real Auth and Incident services.
 
 ## Sync Service contract
 
-This is for the Sync Service owner (Member 3). The frontend uses the standard [y-websocket](https://github.com/yjs/y-websocket) client, so the real service only has to implement this. `sync-dev-server/server.js` (about 200 lines) is a working reference to port to Spring Boot.
+This is the contract the Java `sync-service` implements (see `sync-service/README.md`). The frontend uses the standard [y-websocket](https://github.com/yjs/y-websocket) client. `sync-dev-server/server.js` (about 200 lines) is the legacy Node reference implementation of the same contract.
 
 **Connect:** `ws://<host>:8083/sync/{incidentId}?token=<JWT>` (binary frames). Browsers can't set headers on a WebSocket, hence the query parameter. Don't log query strings.
 
@@ -99,5 +99,5 @@ frontend/
 │   ├── pages/          Login, incident list, incident room
 │   ├── sync/           useIncidentRoom (Yjs doc + IndexedDB + WebSocket + awareness), textarea diff/caret logic
 │   └── config.js       Backend URLs (VITE_* overrides)
-└── sync-dev-server/    Development Sync Service + its tests
+└── sync-dev-server/    Legacy Node reference of the Sync Service + its tests (real Yjs clients)
 ```

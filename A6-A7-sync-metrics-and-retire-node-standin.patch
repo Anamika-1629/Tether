@@ -1,0 +1,513 @@
+diff --git a/README.md b/README.md
+index 9a8e872..8e8732e 100644
+--- a/README.md
++++ b/README.md
+@@ -42,10 +42,10 @@ The incident tool must never become the next point of failure, so Tether is hori
+ | 📋 **Incident management** | Create incidents and update status, severity and owner, all scoped to your organization. | ✅ Live |
+ | 🧾 **Append-only audit trail** | Every change is recorded in order (who, what, old → new, when). The database itself rejects edits or deletes. | ✅ Live |
+ | 🛡️ **Brute-force protection** | Failed logins and join-code guesses are rate limited (HTTP 429). | ✅ Live |
+-| ✍️ **Conflict-free collaborative timeline** | Many responders edit the same timeline at once, and concurrent edits merge automatically (Yjs CRDT). | 🟡 Works with the dev sync server |
+-| 📴 **Offline resilience** | Edits made while disconnected are kept locally and merge cleanly on reconnect. | 🟡 Works with the dev sync server |
+-| 👥 **Live presence** | See who is viewing or editing an incident right now. | 🟡 Works with the dev sync server |
+-| 📈 **Self-observability** | Sync latency, active sessions and reconnect success rate on Grafana dashboards. | 🟡 Auth metrics live |
++| ✍️ **Conflict-free collaborative timeline** | Many responders edit the same timeline at once, and concurrent edits merge automatically (Yjs CRDT). | ✅ Live (sync-service) |
++| 📴 **Offline resilience** | Edits made while disconnected are kept locally and merge cleanly on reconnect. | ✅ Live (sync-service) |
++| 👥 **Live presence** | See who is viewing or editing an incident right now. | ✅ Live (sync-service) |
++| 📈 **Self-observability** | Sync latency, active sessions and reconnect success rate on Grafana dashboards. | 🟡 Auth and sync metrics live, dashboards planned |
+ 
+ ## 🏗 Architecture
+ 
+@@ -108,10 +108,10 @@ docker compose up -d postgres redis
+ # 2. Start the services, each in its own terminal
+ cd auth-service && ./mvnw spring-boot:run        # http://localhost:8081
+ cd incident-service && ./mvnw spring-boot:run    # http://localhost:8082
++cd sync-service && ./mvnw spring-boot:run        # ws://localhost:8083 (start after incident-service)
+ 
+-# 3. Start the frontend and the dev Sync Service
+-cd frontend && npm install && npm run dev:sync   # ws://localhost:8083 (stand-in until sync-service lands)
+-cd frontend && npm run dev                       # http://localhost:3000
++# 3. Start the frontend
++cd frontend && npm install && npm run dev        # http://localhost:3000
+ ```
+ 
+ Open **http://localhost:3000**, create an account, and declare an incident. Open a second tab, join with the code shown in the header, and both tabs share live notes and presence. The full 3-minute demo script is in [frontend/README.md](frontend/README.md#demo-script-two-responders-about-3-minutes).
+@@ -180,7 +180,7 @@ Tether/
+ ├── auth-service/           # 🔐 Auth / Tenant service (Spring Boot, :8081)
+ ├── incident-service/       # 📋 Incident / Timeline service (Spring Boot, :8082)
+ ├── sync-service/           # 🔄 Real-time Sync & Presence service (Spring Boot, :8083)
+-├── frontend/               # 🖥️ React + Yjs incident room (:3000) and the dev Sync Service
++├── frontend/               # 🖥️ React + Yjs incident room (:3000)
+ ├── .github/workflows/      # CI pipelines
+ ├── docker-compose.yml      # Local Postgres + Redis
+ ├── service-config.md       # Ports and shared infrastructure
+diff --git a/frontend/README.md b/frontend/README.md
+index c3b64fb..1392e3f 100644
+--- a/frontend/README.md
++++ b/frontend/README.md
+@@ -18,10 +18,10 @@ npm run dev          # http://localhost:3000
+ 
+ No `.env` is needed: every URL has a localhost default (see [`.env.example`](.env.example) to point elsewhere).
+ 
+-The Sync Service isn't built yet, so this folder includes a **development stand-in** that implements the same contract:
++Real-time sync comes from the Java `sync-service` (start it after the Incident Service):
+ 
+ ```bash
+-npm run dev:sync     # ws://localhost:8083/sync (needs the Incident Service running, for access checks)
++cd sync-service && ./mvnw spring-boot:run     # ws://localhost:8083/sync
+ ```
+ 
+ Without it the app still works. Notes are saved in the browser and the badge says **Offline** until a Sync Service is reachable, after which they merge automatically.
+@@ -29,8 +29,8 @@ Without it the app still works. Notes are saved in the browser and the badge say
+ | Command | What it does |
+ |---|---|
+ | `npm run dev` | Frontend with hot reload on :3000 |
+-| `npm run dev:sync` | Development Sync Service on :8083 |
+-| `npm test` | 19 tests: textarea↔Yjs binding, plus the sync server with real Yjs clients (live edits, concurrent edits, offline merge, presence, auth) |
++| `npm run dev:sync-legacy` | Legacy Node reference server on :8083. Only for working without Java. **Never run it together with `sync-service`** (same port) |
++| `npm test` | 19 tests: textarea↔Yjs binding, plus the legacy Node reference server with real Yjs clients (live edits, concurrent edits, offline merge, presence, auth) |
+ | `npm run build` | Production build into `dist/` |
+ 
+ ## What's on screen
+@@ -54,20 +54,20 @@ The tool is used while production is on fire, so every choice favors "keeps work
+ 
+ ## Demo script (two responders, about 3 minutes)
+ 
+-Start Postgres, `auth-service`, `incident-service`, then `npm run dev:sync` and `npm run dev`.
++Start Postgres (and Redis), `auth-service`, `incident-service`, `sync-service`, then `npm run dev`.
+ 
+ 1. **Tab 1:** Create account → "New organization" → *Alice, Acme Corp*. Note the **join code** in the header.
+ 2. **Tab 1:** Declare *"Checkout API returning 500s"*, SEV2. You land in the incident room: *1 responder active, Live*.
+ 3. **Tab 2** (a new tab is a separate session): Create account → "Join with code" → *Bob* + the code. Open the same incident (from the list).
+ 4. Both tabs show **2 responders active**. Type in Bob's notes and watch it appear in Alice's tab as you type.
+ 5. In Bob's tab, set status **INVESTIGATING** and owner **Bob**. Alice's tab updates by itself, and the timeline shows who changed what.
+-6. **Outage drill:** stop `npm run dev:sync` (Ctrl+C). Alice's badge turns **Offline**; she keeps typing; reload the page and her notes are still there. Restart `npm run dev:sync` and Bob receives everything she wrote.
++6. **Outage drill:** stop `sync-service` (Ctrl+C). Alice's badge turns **Offline**; she keeps typing; reload the page and her notes are still there. Restart `sync-service` and Bob receives everything she wrote.
+ 
+ All six steps were run end to end against the real Auth and Incident services.
+ 
+ ## Sync Service contract
+ 
+-This is for the Sync Service owner (Member 3). The frontend uses the standard [y-websocket](https://github.com/yjs/y-websocket) client, so the real service only has to implement this. `sync-dev-server/server.js` (about 200 lines) is a working reference to port to Spring Boot.
++This is the contract the Java `sync-service` implements (see `sync-service/README.md`). The frontend uses the standard [y-websocket](https://github.com/yjs/y-websocket) client. `sync-dev-server/server.js` (about 200 lines) is the legacy Node reference implementation of the same contract.
+ 
+ **Connect:** `ws://<host>:8083/sync/{incidentId}?token=<JWT>` (binary frames). Browsers can't set headers on a WebSocket, hence the query parameter. Don't log query strings.
+ 
+@@ -99,5 +99,5 @@ frontend/
+ │   ├── pages/          Login, incident list, incident room
+ │   ├── sync/           useIncidentRoom (Yjs doc + IndexedDB + WebSocket + awareness), textarea diff/caret logic
+ │   └── config.js       Backend URLs (VITE_* overrides)
+-└── sync-dev-server/    Development Sync Service + its tests
++└── sync-dev-server/    Legacy Node reference of the Sync Service + its tests (real Yjs clients)
+ ```
+diff --git a/frontend/package.json b/frontend/package.json
+index bf63b3b..454aa81 100644
+--- a/frontend/package.json
++++ b/frontend/package.json
+@@ -5,7 +5,7 @@
+   "type": "module",
+   "scripts": {
+     "dev": "vite",
+-    "dev:sync": "node sync-dev-server/server.js",
++    "dev:sync-legacy": "node sync-dev-server/server.js",
+     "build": "vite build",
+     "preview": "vite preview",
+     "test": "vitest run"
+diff --git a/frontend/sync-dev-server/server.js b/frontend/sync-dev-server/server.js
+index afb45ba..4108b11 100644
+--- a/frontend/sync-dev-server/server.js
++++ b/frontend/sync-dev-server/server.js
+@@ -223,7 +223,7 @@ async function fetchIncident(baseUrl, incidentId, token) {
+   }
+ }
+ 
+-// Run directly: `npm run dev:sync`
++// Legacy reference server (the real service is ../../sync-service). Run directly: `npm run dev:sync-legacy`
+ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+   const port = Number(process.env.PORT ?? 8083)
+   createSyncServer({ port }).listen().then((p) => {
+diff --git a/sync-service/README.md b/sync-service/README.md
+index c60de6b..c1f3cfa 100644
+--- a/sync-service/README.md
++++ b/sync-service/README.md
+@@ -134,6 +134,19 @@ Each room's Yjs history is a Redis list (`tether:sync:room:{tenantId}:{incidentI
+ 
+ ---
+ 
++## Metrics (NFR2)
++
++Exposed at `/actuator/prometheus` (Micrometer). All series carry an `application="sync-service"` tag.
++
++| Series | Type | Meaning |
++|---|---|---|
++| `tether_sync_sessions_active` | gauge | Open responder connections that joined a room |
++| `tether_sync_relay_latency_seconds` (`_count`, `_sum`, `_bucket`) | timer | Time to store one document update and fan it out to the room and Redis. Server side only, not end to end |
++| `tether_sync_reconnects_total` | counter | A responder rejoined the same room within 60 s of leaving it |
++| `tether_sync_rejections_total{reason}` | counter | Connections refused: `unauthorized` (4401), `forbidden` (4403), `unavailable` (1013), `bad_request` |
++
++Check: `curl -s localhost:8083/actuator/prometheus | grep tether_sync`. The relay and reconnect series appear after the first edit and the first rejoin.
++
+ ## 4. Running the Service
+ 
+ ### Using Maven
+diff --git a/sync-service/src/main/java/com/tether/sync/metrics/SyncMetrics.java b/sync-service/src/main/java/com/tether/sync/metrics/SyncMetrics.java
+new file mode 100644
+index 0000000..fc20142
+--- /dev/null
++++ b/sync-service/src/main/java/com/tether/sync/metrics/SyncMetrics.java
+@@ -0,0 +1,71 @@
++package com.tether.sync.metrics;
++
++import io.micrometer.core.instrument.Counter;
++import io.micrometer.core.instrument.Gauge;
++import io.micrometer.core.instrument.MeterRegistry;
++import io.micrometer.core.instrument.Timer;
++import org.springframework.stereotype.Component;
++
++import java.util.concurrent.ConcurrentHashMap;
++import java.util.concurrent.TimeUnit;
++import java.util.concurrent.atomic.AtomicInteger;
++
++/**
++ * Metrics of the sync service (NFR2). Prometheus names in brackets.
++ *
++ *  - tether.sync.sessions.active  gauge    [tether_sync_sessions_active]            open responder connections in rooms
++ *  - tether.sync.relay.latency    timer    [tether_sync_relay_latency_seconds_*]    time to store one update and fan it out
++ *  - tether.sync.reconnects       counter  [tether_sync_reconnects_total]           a responder rejoined a room shortly after leaving it
++ *  - tether.sync.rejections       counter  [tether_sync_rejections_total{reason}]   connections refused: unauthorized, forbidden, unavailable, bad_request
++ */
++@Component
++public class SyncMetrics {
++
++    /** A join by the same user in the same room within this window after leaving counts as a reconnect. */
++    static final long REJOIN_WINDOW_MS = 60_000;
++    private static final int PRUNE_ABOVE = 1_000;
++
++    private final MeterRegistry registry;
++    private final AtomicInteger activeSessions = new AtomicInteger();
++    private final Timer relayLatency;
++    private final Counter reconnects;
++    private final ConcurrentHashMap<String, Long> recentLeaves = new ConcurrentHashMap<>();
++
++    public SyncMetrics(MeterRegistry registry) {
++        this.registry = registry;
++        Gauge.builder("tether.sync.sessions.active", activeSessions, AtomicInteger::get)
++                .description("Open responder WebSocket connections that joined a room")
++                .register(registry);
++        this.relayLatency = Timer.builder("tether.sync.relay.latency")
++                .description("Time to store one document update and fan it out to the room and to Redis")
++                .publishPercentileHistogram()
++                .register(registry);
++        this.reconnects = Counter.builder("tether.sync.reconnects")
++                .description("Responders who rejoined a room shortly after leaving it")
++                .register(registry);
++    }
++
++    public void sessionOpened(String roomKey, String userKey, long nowMs) {
++        activeSessions.incrementAndGet();
++        Long leftAt = recentLeaves.remove(roomKey + "|" + userKey);
++        if (leftAt != null && nowMs - leftAt <= REJOIN_WINDOW_MS) {
++            reconnects.increment();
++        }
++    }
++
++    public void sessionClosed(String roomKey, String userKey, long nowMs) {
++        activeSessions.updateAndGet(n -> Math.max(0, n - 1));
++        recentLeaves.put(roomKey + "|" + userKey, nowMs);
++        if (recentLeaves.size() > PRUNE_ABOVE) {
++            recentLeaves.values().removeIf(leftAt -> nowMs - leftAt > REJOIN_WINDOW_MS);
++        }
++    }
++
++    public void recordRelay(long nanos) {
++        relayLatency.record(nanos, TimeUnit.NANOSECONDS);
++    }
++
++    public void rejected(String reason) {
++        registry.counter("tether.sync.rejections", "reason", reason).increment();
++    }
++}
+diff --git a/sync-service/src/main/java/com/tether/sync/websocket/SyncWebSocketHandler.java b/sync-service/src/main/java/com/tether/sync/websocket/SyncWebSocketHandler.java
+index 3bb8beb..d47c082 100644
+--- a/sync-service/src/main/java/com/tether/sync/websocket/SyncWebSocketHandler.java
++++ b/sync-service/src/main/java/com/tether/sync/websocket/SyncWebSocketHandler.java
+@@ -2,6 +2,7 @@ package com.tether.sync.websocket;
+ 
+ import com.tether.sync.crdt.VarUintUtils;
+ import com.tether.sync.crdt.YjsProtocolConstants;
++import com.tether.sync.metrics.SyncMetrics;
+ import com.tether.sync.model.Room;
+ import com.tether.sync.security.IncidentAccessValidator;
+ import com.tether.sync.security.JwtTokenValidator;
+@@ -9,8 +10,10 @@ import com.tether.sync.service.LogCompactor;
+ import com.tether.sync.service.RedisPubSubRelay;
+ import com.tether.sync.service.RoomManager;
+ import com.tether.sync.store.UpdateLogStore;
++import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
+ import org.slf4j.Logger;
+ import org.slf4j.LoggerFactory;
++import org.springframework.beans.factory.annotation.Autowired;
+ import org.springframework.beans.factory.annotation.Value;
+ import org.springframework.scheduling.annotation.Scheduled;
+ import org.springframework.stereotype.Component;
+@@ -51,8 +54,10 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+     private final UpdateLogStore updateLog;
+     private final LogCompactor compactor;
+     private final long heartbeatTimeoutMs;
++    private final SyncMetrics metrics;
+     private volatile LongSupplier clock = System::currentTimeMillis;
+ 
++    /** Without metrics wiring (unit tests): records into a throwaway registry. */
+     public SyncWebSocketHandler(
+             JwtTokenValidator jwtTokenValidator,
+             IncidentAccessValidator incidentAccessValidator,
+@@ -60,7 +65,22 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+             RedisPubSubRelay redisRelay,
+             UpdateLogStore updateLog,
+             LogCompactor compactor,
+-            @Value("${tether.sync.heartbeat-timeout-ms:30000}") long heartbeatTimeoutMs) {
++            long heartbeatTimeoutMs) {
++        this(jwtTokenValidator, incidentAccessValidator, roomManager, redisRelay, updateLog, compactor,
++                heartbeatTimeoutMs, new SyncMetrics(new SimpleMeterRegistry()));
++    }
++
++    @Autowired
++    public SyncWebSocketHandler(
++            JwtTokenValidator jwtTokenValidator,
++            IncidentAccessValidator incidentAccessValidator,
++            RoomManager roomManager,
++            RedisPubSubRelay redisRelay,
++            UpdateLogStore updateLog,
++            LogCompactor compactor,
++            @Value("${tether.sync.heartbeat-timeout-ms:30000}") long heartbeatTimeoutMs,
++            SyncMetrics metrics) {
++        this.metrics = metrics;
+         this.jwtTokenValidator = jwtTokenValidator;
+         this.incidentAccessValidator = incidentAccessValidator;
+         this.roomManager = roomManager;
+@@ -74,6 +94,7 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
+         URI uri = session.getUri();
+         if (uri == null) {
++            metrics.rejected("bad_request");
+             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_FORBIDDEN, "Invalid URI"));
+             return;
+         }
+@@ -81,6 +102,7 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+         String path = uri.getPath();
+         Matcher matcher = PATH_PATTERN.matcher(path);
+         if (!matcher.matches()) {
++            metrics.rejected("bad_request");
+             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_FORBIDDEN, "Unknown room"));
+             return;
+         }
+@@ -91,6 +113,7 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+         JwtTokenValidator.Claims claims = jwtTokenValidator.validateToken(token);
+         if (claims == null) {
+             log.warn("Unauthorized connection rejected for incident {}", incidentId);
++            metrics.rejected("unauthorized");
+             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_UNAUTHORIZED, "Invalid or expired token"));
+             return;
+         }
+@@ -100,12 +123,14 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+             // Fail closed: cannot verify tenant access right now, so nobody joins. Retryable close code.
+             log.warn("Rejected connection for incident {} from tenant {}: access check unavailable",
+                     incidentId, claims.tenantId());
++            metrics.rejected("unavailable");
+             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_TRY_AGAIN_LATER,
+                     "Cannot verify incident access, retry shortly"));
+             return;
+         }
+         if (access == IncidentAccessValidator.Decision.DENIED) {
+             log.warn("Forbidden connection for incident {} from tenant {}", incidentId, claims.tenantId());
++            metrics.rejected("forbidden");
+             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_FORBIDDEN, "No access to this incident"));
+             return;
+         }
+@@ -115,6 +140,7 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+         session.getAttributes().put("claims", claims);
+         touch(session);
+         room.addSession(session);
++        metrics.sessionOpened(room.getRoomKey(), userKey(claims), clock.getAsLong());
+ 
+         log.info("[sync] {} joined room {} ({} responders connected)",
+                 claims.email(), incidentId, room.getSessions().size());
+@@ -152,10 +178,12 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+                     if (syncType == YjsProtocolConstants.SYNC_STEP2 && compactor.consumeStep2(session, room, update)) {
+                         return; // this was the full-state snapshot we asked for; it replaced the old log prefix
+                     }
++                    long relayStart = System.nanoTime();
+                     long logSize = updateLog.append(room.getRoomKey(), update);
+                     byte[] syncFrame = encodeSync(YjsProtocolConstants.SYNC_UPDATE, update);
+                     broadcastToRoom(room, syncFrame, session);
+                     redisRelay.publish(room.getRoomKey(), YjsProtocolConstants.MESSAGE_SYNC, syncFrame);
++                    metrics.recordRelay(System.nanoTime() - relayStart);
+                     compactor.maybeRequestSnapshot(session, room, logSize);
+                 }
+             } else if (messageType == YjsProtocolConstants.MESSAGE_AWARENESS) {
+@@ -242,6 +270,8 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+             return;
+         }
+         room.removeSession(session);
++        JwtTokenValidator.Claims leaving = (JwtTokenValidator.Claims) session.getAttributes().get("claims");
++        metrics.sessionClosed(room.getRoomKey(), leaving != null ? userKey(leaving) : session.getId(), clock.getAsLong());
+         compactor.onSessionClosed(session, room);
+         broadcastAwarenessRemoval(session, room);
+         roomManager.removeRoomIfEmpty(room.getRoomKey());
+@@ -250,6 +280,10 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
+         log.info("[sync] {} left room {} ({} responders connected)", who, room.getIncidentId(), room.getSessions().size());
+     }
+ 
++    private static String userKey(JwtTokenValidator.Claims claims) {
++        return claims.userId() != null ? claims.userId() : claims.email();
++    }
++
+     private void touch(WebSocketSession session) {
+         AtomicLong lastSeen = (AtomicLong) session.getAttributes()
+                 .computeIfAbsent(ATTR_LAST_SEEN, k -> new AtomicLong());
+diff --git a/sync-service/src/main/resources/application.properties b/sync-service/src/main/resources/application.properties
+index 270d1f6..6218b8f 100644
+--- a/sync-service/src/main/resources/application.properties
++++ b/sync-service/src/main/resources/application.properties
+@@ -33,6 +33,8 @@ tether.sync.redis-topic=${SYNC_REDIS_TOPIC:tether:sync:events}
+ # Observability (NFR2)
+ management.endpoints.web.exposure.include=health,info,prometheus,metrics
+ management.endpoint.health.show-details=always
++# Tag every series with the service name so one Prometheus can scrape all services
++management.metrics.tags.application=${spring.application.name}
+ 
+ # WebSocket heartbeat: ping every interval, drop sessions silent for longer than the timeout
+ tether.sync.heartbeat-interval-ms=${SYNC_HEARTBEAT_INTERVAL_MS:10000}
+diff --git a/sync-service/src/test/java/com/tether/sync/SyncMetricsTest.java b/sync-service/src/test/java/com/tether/sync/SyncMetricsTest.java
+new file mode 100644
+index 0000000..b3e2206
+--- /dev/null
++++ b/sync-service/src/test/java/com/tether/sync/SyncMetricsTest.java
+@@ -0,0 +1,88 @@
++package com.tether.sync;
++
++import com.tether.sync.metrics.SyncMetrics;
++import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
++import org.junit.jupiter.api.BeforeEach;
++import org.junit.jupiter.api.Test;
++
++import static org.junit.jupiter.api.Assertions.assertEquals;
++
++class SyncMetricsTest {
++
++    private SimpleMeterRegistry registry;
++    private SyncMetrics metrics;
++
++    @BeforeEach
++    void setUp() {
++        registry = new SimpleMeterRegistry();
++        metrics = new SyncMetrics(registry);
++    }
++
++    @Test
++    void activeSessionsGoesUpAndDownAndNeverBelowZero() {
++        metrics.sessionOpened("room", "alice", 0);
++        metrics.sessionOpened("room", "bob", 0);
++        assertEquals(2.0, active());
++
++        metrics.sessionClosed("room", "alice", 1_000);
++        assertEquals(1.0, active());
++
++        metrics.sessionClosed("room", "bob", 1_000);
++        metrics.sessionClosed("room", "ghost", 1_000);
++        assertEquals(0.0, active());
++    }
++
++    @Test
++    void rejoiningTheSameRoomQuicklyCountsAsAReconnect() {
++        metrics.sessionOpened("room", "alice", 0);
++        metrics.sessionClosed("room", "alice", 1_000);
++        metrics.sessionOpened("room", "alice", 11_000);
++
++        assertEquals(1.0, reconnects());
++    }
++
++    @Test
++    void aNewUserOrALongAbsenceOrAnotherRoomIsNotAReconnect() {
++        metrics.sessionOpened("room", "alice", 0);
++        metrics.sessionClosed("room", "alice", 1_000);
++
++        metrics.sessionOpened("room", "bob", 2_000);                 // never been here
++        metrics.sessionOpened("other-room", "alice", 3_000);         // different room
++        metrics.sessionOpened("room", "alice", 1_000 + 120_000);     // far outside the window
++
++        assertEquals(0.0, reconnects());
++    }
++
++    @Test
++    void rejectionsAreCountedPerReason() {
++        metrics.rejected("unauthorized");
++        metrics.rejected("unauthorized");
++        metrics.rejected("forbidden");
++
++        assertEquals(2.0, rejections("unauthorized"));
++        assertEquals(1.0, rejections("forbidden"));
++        assertEquals(0.0, rejections("unavailable"));
++    }
++
++    @Test
++    void relayLatencyIsRecordedAsATimer() {
++        metrics.recordRelay(2_000_000);
++        metrics.recordRelay(4_000_000);
++
++        var timer = registry.get("tether.sync.relay.latency").timer();
++        assertEquals(2, timer.count());
++        assertEquals(6.0, timer.totalTime(java.util.concurrent.TimeUnit.MILLISECONDS), 0.001);
++    }
++
++    private double active() {
++        return registry.get("tether.sync.sessions.active").gauge().value();
++    }
++
++    private double reconnects() {
++        return registry.get("tether.sync.reconnects").counter().count();
++    }
++
++    private double rejections(String reason) {
++        return registry.counter("tether.sync.rejections", "reason", reason).count();
++    }
++}
+diff --git a/sync-service/src/test/java/com/tether/sync/SyncWebSocketIntegrationTest.java b/sync-service/src/test/java/com/tether/sync/SyncWebSocketIntegrationTest.java
+index 1dd1ecd..bd50814 100644
+--- a/sync-service/src/test/java/com/tether/sync/SyncWebSocketIntegrationTest.java
++++ b/sync-service/src/test/java/com/tether/sync/SyncWebSocketIntegrationTest.java
+@@ -8,6 +8,7 @@ import com.tether.sync.security.IncidentAccessValidator.Decision;
+ import com.tether.sync.security.JwtTokenValidator;
+ import com.tether.sync.service.RedisPubSubRelay;
+ import com.tether.sync.websocket.SyncWebSocketHandler;
++import io.micrometer.core.instrument.MeterRegistry;
+ import org.junit.jupiter.api.AfterEach;
+ import org.junit.jupiter.api.BeforeEach;
+ import org.junit.jupiter.api.Test;
+@@ -75,6 +76,9 @@ class SyncWebSocketIntegrationTest {
+     @Autowired
+     private JwtTokenValidator jwtValidator;
+ 
++    @Autowired
++    private MeterRegistry meterRegistry;
++
+     // Stand-ins for the Incident Service check and for Redis, so the test needs no other process.
+     @MockBean
+     private IncidentAccessValidator access;
+@@ -232,6 +236,17 @@ class SyncWebSocketIntegrationTest {
+                 "unexpected close code " + code);
+     }
+ 
++    @Test
++    void rejectedConnections_areCountedByReason() throws Exception {
++        double before = rejections("unauthorized");
++        assertClosedWith(YjsProtocolConstants.CLOSE_UNAUTHORIZED, connect("mallory", "not-a-jwt"));
++        assertEquals(before + 1, rejections("unauthorized"));
++    }
++
++    private double rejections(String reason) {
++        return meterRegistry.counter("tether.sync.rejections", "reason", reason).count();
++    }
++
+     // ---- isolation --------------------------------------------------------------
+ 
+     @Test

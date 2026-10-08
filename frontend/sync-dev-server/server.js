@@ -223,7 +223,7 @@ async function fetchIncident(baseUrl, incidentId, token) {
   }
 }
 
-// Run directly: `npm run dev:sync`
+// Legacy reference server (the real service is ../../sync-service). Run directly: `npm run dev:sync-legacy`
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
   const port = Number(process.env.PORT ?? 8083)
   createSyncServer({ port }).listen().then((p) => {

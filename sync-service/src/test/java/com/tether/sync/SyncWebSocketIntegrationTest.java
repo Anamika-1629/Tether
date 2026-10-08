@@ -8,6 +8,7 @@ import com.tether.sync.security.IncidentAccessValidator.Decision;
 import com.tether.sync.security.JwtTokenValidator;
 import com.tether.sync.service.RedisPubSubRelay;
 import com.tether.sync.websocket.SyncWebSocketHandler;
+import io.micrometer.core.instrument.MeterRegistry;
 import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -74,6 +75,9 @@ class SyncWebSocketIntegrationTest {
 
     @Autowired
     private JwtTokenValidator jwtValidator;
+
+    @Autowired
+    private MeterRegistry meterRegistry;
 
     // Stand-ins for the Incident Service check and for Redis, so the test needs no other process.
     @MockBean
@@ -230,6 +234,17 @@ class SyncWebSocketIntegrationTest {
         // client does not accept 1013 and reports it as 1002 (protocol error); browsers pass 1013 through.
         assertTrue(code == YjsProtocolConstants.CLOSE_TRY_AGAIN_LATER || code == 1002,
                 "unexpected close code " + code);
+    }
+
+    @Test
+    void rejectedConnections_areCountedByReason() throws Exception {
+        double before = rejections("unauthorized");
+        assertClosedWith(YjsProtocolConstants.CLOSE_UNAUTHORIZED, connect("mallory", "not-a-jwt"));
+        assertEquals(before + 1, rejections("unauthorized"));
+    }
+
+    private double rejections(String reason) {
+        return meterRegistry.counter("tether.sync.rejections", "reason", reason).count();
     }
 
     // ---- isolation --------------------------------------------------------------

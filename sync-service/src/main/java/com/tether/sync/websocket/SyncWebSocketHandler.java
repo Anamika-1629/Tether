@@ -2,6 +2,7 @@ package com.tether.sync.websocket;
 
 import com.tether.sync.crdt.VarUintUtils;
 import com.tether.sync.crdt.YjsProtocolConstants;
+import com.tether.sync.metrics.SyncMetrics;
 import com.tether.sync.model.Room;
 import com.tether.sync.security.IncidentAccessValidator;
 import com.tether.sync.security.JwtTokenValidator;
@@ -9,8 +10,10 @@ import com.tether.sync.service.LogCompactor;
 import com.tether.sync.service.RedisPubSubRelay;
 import com.tether.sync.service.RoomManager;
 import com.tether.sync.store.UpdateLogStore;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
@@ -51,8 +54,10 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
     private final UpdateLogStore updateLog;
     private final LogCompactor compactor;
     private final long heartbeatTimeoutMs;
+    private final SyncMetrics metrics;
     private volatile LongSupplier clock = System::currentTimeMillis;
 
+    /** Without metrics wiring (unit tests): records into a throwaway registry. */
     public SyncWebSocketHandler(
             JwtTokenValidator jwtTokenValidator,
             IncidentAccessValidator incidentAccessValidator,
@@ -60,7 +65,22 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
             RedisPubSubRelay redisRelay,
             UpdateLogStore updateLog,
             LogCompactor compactor,
-            @Value("${tether.sync.heartbeat-timeout-ms:30000}") long heartbeatTimeoutMs) {
+            long heartbeatTimeoutMs) {
+        this(jwtTokenValidator, incidentAccessValidator, roomManager, redisRelay, updateLog, compactor,
+                heartbeatTimeoutMs, new SyncMetrics(new SimpleMeterRegistry()));
+    }
+
+    @Autowired
+    public SyncWebSocketHandler(
+            JwtTokenValidator jwtTokenValidator,
+            IncidentAccessValidator incidentAccessValidator,
+            RoomManager roomManager,
+            RedisPubSubRelay redisRelay,
+            UpdateLogStore updateLog,
+            LogCompactor compactor,
+            @Value("${tether.sync.heartbeat-timeout-ms:30000}") long heartbeatTimeoutMs,
+            SyncMetrics metrics) {
+        this.metrics = metrics;
         this.jwtTokenValidator = jwtTokenValidator;
         this.incidentAccessValidator = incidentAccessValidator;
         this.roomManager = roomManager;
@@ -74,6 +94,7 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
         URI uri = session.getUri();
         if (uri == null) {
+            metrics.rejected("bad_request");
             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_FORBIDDEN, "Invalid URI"));
             return;
         }
@@ -81,6 +102,7 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
         String path = uri.getPath();
         Matcher matcher = PATH_PATTERN.matcher(path);
         if (!matcher.matches()) {
+            metrics.rejected("bad_request");
             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_FORBIDDEN, "Unknown room"));
             return;
         }
@@ -91,6 +113,7 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
         JwtTokenValidator.Claims claims = jwtTokenValidator.validateToken(token);
         if (claims == null) {
             log.warn("Unauthorized connection rejected for incident {}", incidentId);
+            metrics.rejected("unauthorized");
             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_UNAUTHORIZED, "Invalid or expired token"));
             return;
         }
@@ -100,12 +123,14 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
             // Fail closed: cannot verify tenant access right now, so nobody joins. Retryable close code.
             log.warn("Rejected connection for incident {} from tenant {}: access check unavailable",
                     incidentId, claims.tenantId());
+            metrics.rejected("unavailable");
             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_TRY_AGAIN_LATER,
                     "Cannot verify incident access, retry shortly"));
             return;
         }
         if (access == IncidentAccessValidator.Decision.DENIED) {
             log.warn("Forbidden connection for incident {} from tenant {}", incidentId, claims.tenantId());
+            metrics.rejected("forbidden");
             session.close(new CloseStatus(YjsProtocolConstants.CLOSE_FORBIDDEN, "No access to this incident"));
             return;
         }
@@ -115,6 +140,7 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
         session.getAttributes().put("claims", claims);
         touch(session);
         room.addSession(session);
+        metrics.sessionOpened(room.getRoomKey(), userKey(claims), clock.getAsLong());
 
         log.info("[sync] {} joined room {} ({} responders connected)",
                 claims.email(), incidentId, room.getSessions().size());
@@ -152,10 +178,12 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
                     if (syncType == YjsProtocolConstants.SYNC_STEP2 && compactor.consumeStep2(session, room, update)) {
                         return; // this was the full-state snapshot we asked for; it replaced the old log prefix
                     }
+                    long relayStart = System.nanoTime();
                     long logSize = updateLog.append(room.getRoomKey(), update);
                     byte[] syncFrame = encodeSync(YjsProtocolConstants.SYNC_UPDATE, update);
                     broadcastToRoom(room, syncFrame, session);
                     redisRelay.publish(room.getRoomKey(), YjsProtocolConstants.MESSAGE_SYNC, syncFrame);
+                    metrics.recordRelay(System.nanoTime() - relayStart);
                     compactor.maybeRequestSnapshot(session, room, logSize);
                 }
             } else if (messageType == YjsProtocolConstants.MESSAGE_AWARENESS) {
@@ -242,12 +270,18 @@ public class SyncWebSocketHandler extends BinaryWebSocketHandler {
             return;
         }
         room.removeSession(session);
+        JwtTokenValidator.Claims leaving = (JwtTokenValidator.Claims) session.getAttributes().get("claims");
+        metrics.sessionClosed(room.getRoomKey(), leaving != null ? userKey(leaving) : session.getId(), clock.getAsLong());
         compactor.onSessionClosed(session, room);
         broadcastAwarenessRemoval(session, room);
         roomManager.removeRoomIfEmpty(room.getRoomKey());
         JwtTokenValidator.Claims claims = (JwtTokenValidator.Claims) session.getAttributes().get("claims");
         String who = claims != null ? claims.email() : session.getId();
         log.info("[sync] {} left room {} ({} responders connected)", who, room.getIncidentId(), room.getSessions().size());
+    }
+
+    private static String userKey(JwtTokenValidator.Claims claims) {
+        return claims.userId() != null ? claims.userId() : claims.email();
     }
 
     private void touch(WebSocketSession session) {
