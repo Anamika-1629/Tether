@@ -38,6 +38,7 @@ public class RedisConfig {
             @Value("${tether.sync.redis-topic:tether:sync:events}") String topic) {
         RedisMessageListenerContainer container = new RedisMessageListenerContainer();
         container.setConnectionFactory(connectionFactory);
+        container.setRecoveryInterval(2000L);
         container.addMessageListener(relay, new ChannelTopic(topic));
         return container;
     }
