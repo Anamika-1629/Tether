@@ -73,7 +73,7 @@ This is for the Sync Service owner (Member 3). The frontend uses the standard [y
 
 **Access check, on connect:**
 1. Verify the JWT: HS256, same `JWT_SECRET`, `iss = tether-auth`, not expired. Otherwise close with **4401**.
-2. Check the incident belongs to the token's `tenantId`. The dev server calls `GET /incidents/{id}` on the Incident Service with the same token; 404 means close with **4403**. The client stops retrying on any 44xx code.
+2. Check the incident belongs to the token's `tenantId`. The dev server calls `GET /incidents/{id}` on the Incident Service with the same token; 404 means close with **4403**. The client stops retrying on any 44xx code. If the Incident Service is unreachable or erroring, the Sync Service closes with **1013** (try again later) instead, which the client does retry.
 3. The room key is `tenantId:incidentId`.
 
 **Messages:** each frame starts with a varUint type (lib0 encoding):

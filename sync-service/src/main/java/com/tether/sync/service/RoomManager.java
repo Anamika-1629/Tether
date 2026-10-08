@@ -5,11 +5,13 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
 /**
- * Manages active collaborative rooms in memory, keyed by "tenantId:incidentId".
+ * Tracks the rooms that currently have connected sessions on this instance, keyed by "tenantId:incidentId".
  */
 @Service
 public class RoomManager {
@@ -31,11 +33,21 @@ public class RoomManager {
     }
 
     public void removeRoomIfEmpty(String roomKey) {
-        Room room = rooms.get(roomKey);
-        if (room != null && room.isEmpty() && room.getUpdates().isEmpty()) {
-            rooms.remove(roomKey);
-            log.info("Removed empty room: {}", roomKey);
-        }
+        // History lives in the UpdateLogStore, so an empty room can always be dropped from memory.
+        boolean[] removed = {false};
+        rooms.computeIfPresent(roomKey, (k, room) -> {
+            if (room.isEmpty()) {
+                removed[0] = true;
+                return null;
+            }
+            return room;
+        });
+        if (removed[0]) log.info("Removed empty room: {}", roomKey);
+    }
+
+    /** Snapshot of the current rooms, safe to iterate while rooms are added or removed. */
+    public Collection<Room> getRooms() {
+        return new ArrayList<>(rooms.values());
     }
 
     public int getRoomCount() {
